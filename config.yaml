@@ -1,0 +1,6 @@
+server: "172.25.191.18:22"
+user: "master"
+key_file: "~/.ssh/id_rsa"
+forwards:
+  - local: ":8080"
+    remote: "127.0.0.1:8000"

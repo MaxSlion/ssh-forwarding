@@ -1,0 +1,7 @@
+allowed_ports:
+  - name: "GitLab Web"
+    target: "127.0.0.1:9980"
+  - name: "GitLab SSH"
+    target: "127.0.0.1:9922"
+  - name: "OpenWebUI"
+    target: "127.0.0.1:3000"

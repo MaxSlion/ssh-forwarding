@@ -1,0 +1,317 @@
+@import './tailwind.css';
+@import './theme.css';
+
+.app-drag {
+    --wails-draggable: drag;
+}
+
+.app-no-drag {
+    --wails-draggable: no-drag;
+}
+
+/* ============================================================================
+   Global Transitions - Smooth theme switching
+   ============================================================================ */
+
+*,
+*::before,
+*::after {
+    transition-property: background-color, border-color, color, fill, stroke, box-shadow;
+    transition-duration: 200ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Exclude elements where transitions cause issues */
+input,
+textarea,
+.no-transition {
+    transition-property: border-color, box-shadow;
+}
+
+/* ============================================================================
+   Modal Animations
+   ============================================================================ */
+
+/* Backdrop fade in */
+@keyframes backdrop-in {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+/* Modal slide up + fade in */
+@keyframes modal-in {
+    from {
+        opacity: 0;
+        transform: scale(0.95) translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+/* Modal slide down + fade out */
+@keyframes modal-out {
+    from {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+
+    to {
+        opacity: 0;
+        transform: scale(0.95) translateY(10px);
+    }
+}
+
+/* Backdrop fade out */
+@keyframes backdrop-out {
+    from {
+        opacity: 1;
+    }
+
+    to {
+        opacity: 0;
+    }
+}
+
+.modal-backdrop {
+    animation: backdrop-in 200ms ease-out;
+}
+
+.modal-backdrop.closing {
+    animation: backdrop-out 200ms ease-in forwards;
+}
+
+.modal-content {
+    animation: modal-in 250ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modal-content.closing {
+    animation: modal-out 200ms ease-in forwards;
+}
+
+/* ============================================================================
+   Button Animations
+   ============================================================================ */
+
+button,
+[role="button"] {
+    transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+button:active:not(:disabled),
+[role="button"]:active:not(:disabled) {
+    transform: scale(0.97);
+}
+
+/* Primary button glow effect */
+.btn-primary-glow {
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-primary-glow::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg,
+            rgba(255, 255, 255, 0.2) 0%,
+            transparent 50%);
+    opacity: 0;
+    transition: opacity 200ms;
+}
+
+.btn-primary-glow:hover::after {
+    opacity: 1;
+}
+
+/* ============================================================================
+   Sidebar Animations
+   ============================================================================ */
+
+.sidebar-item {
+    transition: all 150ms ease-out;
+    position: relative;
+}
+
+.sidebar-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%) scaleY(0);
+    width: 3px;
+    height: 60%;
+    border-radius: 0 4px 4px 0;
+    background: #3b82f6;
+    transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sidebar-item:hover::before,
+.sidebar-item.active::before {
+    transform: translateY(-50%) scaleY(1);
+}
+
+/* ============================================================================
+   Status Bar Animations
+   ============================================================================ */
+
+@keyframes status-fade {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.status-text {
+    animation: status-fade 300ms ease-out;
+}
+
+/* ============================================================================
+   Connection State Transition
+   ============================================================================ */
+
+@keyframes slide-in-right {
+    from {
+        opacity: 0;
+        transform: translateX(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes slide-in-up {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.panel-enter {
+    animation: slide-in-up 350ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.port-item {
+    animation: slide-in-right 300ms cubic-bezier(0.16, 1, 0.3, 1);
+    animation-fill-mode: both;
+}
+
+.port-item:nth-child(1) {
+    animation-delay: 0ms;
+}
+
+.port-item:nth-child(2) {
+    animation-delay: 60ms;
+}
+
+.port-item:nth-child(3) {
+    animation-delay: 120ms;
+}
+
+.port-item:nth-child(4) {
+    animation-delay: 180ms;
+}
+
+.port-item:nth-child(5) {
+    animation-delay: 240ms;
+}
+
+.port-item:nth-child(6) {
+    animation-delay: 300ms;
+}
+
+/* ============================================================================
+   Toggle Switch Animation
+   ============================================================================ */
+
+.toggle-track {
+    transition: background-color 200ms ease;
+}
+
+.toggle-thumb {
+    transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ============================================================================
+   Input Focus Animation
+   ============================================================================ */
+
+input:focus,
+textarea:focus {
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+/* ============================================================================
+   Card Hover Effect
+   ============================================================================ */
+
+.card-hover {
+    transition: box-shadow 200ms ease, transform 200ms ease;
+}
+
+.card-hover:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    transform: translateY(-1px);
+}
+
+/* ============================================================================
+   Success Pulse
+   ============================================================================ */
+
+@keyframes success-pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+    }
+
+    70% {
+        box-shadow: 0 0 0 8px rgba(34, 197, 94, 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+    }
+}
+
+.success-pulse {
+    animation: success-pulse 1.5s ease-out;
+}
+
+/* ============================================================================
+   Loading Shimmer
+   ============================================================================ */
+
+@keyframes shimmer {
+    0% {
+        background-position: -200px 0;
+    }
+
+    100% {
+        background-position: 200px 0;
+    }
+}
+
+.shimmer {
+    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.1) 50%, transparent 100%);
+    background-size: 200px 100%;
+    animation: shimmer 1.5s infinite;
+}
