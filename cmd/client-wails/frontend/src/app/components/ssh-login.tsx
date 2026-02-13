@@ -23,6 +23,8 @@ interface PortForward {
   name: string;
   target: string;
   description?: string;
+  static?: boolean;
+  local_port?: number;
 }
 
 // Storage helpers
@@ -107,7 +109,9 @@ export function SSHLogin() {
           setForwardedPorts(res.config.allowed_ports.map(p => ({
             name: p.name,
             target: p.target,
-            description: p.description
+            description: p.description,
+            static: (p as any).static,
+            local_port: (p as any).local_port
           })));
         }
 
@@ -238,9 +242,22 @@ export function SSHLogin() {
       }
     } else {
       // Start
-      // Use ":0" to let OS pick a random port
+      let bindPort = ":0"; // Default random
+
+      if (port.static) {
+        if (port.local_port && port.local_port > 0) {
+          bindPort = `:${port.local_port}`;
+        } else {
+          // Try to infer from target if no local_port specified
+          const parts = port.target.split(":");
+          if (parts.length === 2) {
+            bindPort = `:${parts[1]}`;
+          }
+        }
+      }
+
       try {
-        const boundAddr = await StartForward(":0", port.target);
+        const boundAddr = await StartForward(bindPort, port.target);
         setForwardingStatus(prev => ({ ...prev, [port.name]: boundAddr }));
       } catch (e) {
         setStatus(`${t.errorPrefix}: ${e}`);

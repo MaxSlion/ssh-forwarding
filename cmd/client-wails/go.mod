@@ -1,4 +1,4 @@
-module client-wails
+module github.com/maxslion/endpoint-client
 
 go 1.24.0
 

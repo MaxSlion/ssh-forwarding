@@ -3,5 +3,7 @@ allowed_ports:
     target: "127.0.0.1:9980"
   - name: "GitLab SSH"
     target: "127.0.0.1:9922"
+    static: true
+    local_port: 2222
   - name: "OpenWebUI"
     target: "127.0.0.1:3000"
