@@ -25,7 +25,7 @@
 ### 2.2 推荐架构：基于 SSH Stio 的自定义多路复用
 
 1.  **Transport Layer (传输层)**: 标准 SSH 连接 (Port 22)。
-2.  **Session Layer (会话层)**: 客户端连接 SSH 后，通过 `Session.RequestExec("./server-agent")` 启动服务端代理。
+2.  **Session Layer (会话层)**: 客户端连接 SSH 后，通过 `Session.RequestExec("/server-agent")` 启动服务端代理。
 3.  **Tunnel Layer (隧道层)**: 客户端与服务端 Agent 的 `Stdin/Stdout` 之间建立一条全双工流。
 4.  **Application Layer (应用层)**:
     -   **Control Stream**: 用于交换配置、服务发现、心跳。
@@ -110,7 +110,7 @@ allowed_ports:
 
 ### 4.3 常见问题答疑
 -   **Q: 服务端是否监听 22 端口?**
-    -   **A**: 不。服务端 SSHD (系统服务) 监听 22 端口。我们的 `server-agent` 是一个普通的可执行文件。当客户端通过 SSH 登录后，会自动执行 `./server-agent`。它复用 SSH 的加密通道，不监听任何额外的服务器端口。
+    -   **A**: 不。服务端 SSHD (系统服务) 监听 22 端口。我们的 `server-agent` 是一个普通的可执行文件。当客户端通过 SSH 登录后，会自动执行 `/server-agent`。它复用 SSH 的加密通道，不监听任何额外的服务器端口。
 
 ## 5. 性能与安全
 (保留原有优化策略)

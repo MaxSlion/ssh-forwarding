@@ -120,7 +120,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                     type="text"
                                     value={settings.agentPath}
                                     onChange={(e) => update("agentPath", e.target.value)}
-                                    placeholder="./server-agent"
+                                    placeholder="/server-agent"
                                     className={`h-9 font-mono text-sm ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100' : 'border-slate-300'}`}
                                 />
                                 <p className={`text-xs ${isDark ? 'text-gray-500' : 'text-slate-500'}`}>
@@ -213,7 +213,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                                 : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
                                             }`}
                                     >
-                                        ☀️ {t.themeLight}
+                                        {t.themeLight}
                                     </button>
                                     <button
                                         onClick={() => updateTheme("dark")}
@@ -224,7 +224,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                                 : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
                                             }`}
                                     >
-                                        🌙 {t.themeDark}
+                                        {t.themeDark}
                                     </button>
                                 </div>
                             </div>

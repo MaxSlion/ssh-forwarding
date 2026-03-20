@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,9 +10,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"ssh-forwarder/pkg/protocol"
@@ -25,17 +28,17 @@ import (
 // ============================================================================
 
 type ServerConfig struct {
-	AllowedPorts    []protocol.PortConfig `yaml:"allowed_ports"`
-	MaxStreams      int                   `yaml:"max_streams"`       // Max concurrent streams per session (default: 100)
-	IdleTimeout     time.Duration         `yaml:"idle_timeout"`      // Idle timeout for connections (default: 5m)
-	ConnectTimeout  time.Duration         `yaml:"connect_timeout"`   // Timeout for dialing targets (default: 10s)
-	MetricsPort     int                   `yaml:"metrics_port"`      // Port for metrics endpoint (0 = disabled)
+	AllowedPorts   []protocol.PortConfig `yaml:"allowed_ports"`
+	MaxStreams      int                   `yaml:"max_streams"`      // Max concurrent streams per session (default: 100)
+	IdleTimeout    time.Duration         `yaml:"idle_timeout"`     // Idle timeout for connections (default: 5m)
+	ConnectTimeout time.Duration         `yaml:"connect_timeout"`  // Timeout for dialing targets (default: 10s)
+	MetricsPort    int                   `yaml:"metrics_port"`     // Port for metrics endpoint (0 = disabled)
 }
 
 func defaultConfig() *ServerConfig {
 	return &ServerConfig{
 		AllowedPorts:   []protocol.PortConfig{},
-		MaxStreams:     100,
+		MaxStreams:      100,
 		IdleTimeout:    5 * time.Minute,
 		ConnectTimeout: 10 * time.Second,
 		MetricsPort:    0,
@@ -64,22 +67,22 @@ func putBuffer(buf *[]byte) {
 }
 
 // ============================================================================
-// Metrics
+// Metrics (renamed to ServerMetrics for clarity — Fix #15)
 // ============================================================================
 
-type Metrics struct {
-	ActiveStreams    int64
-	TotalStreams     int64
-	TotalBytes       int64
-	HandshakeCount   int64
-	ConnectCount     int64
-	ConnectErrors    int64
-	DeniedRequests   int64
+type ServerMetrics struct {
+	ActiveStreams  int64
+	TotalStreams   int64
+	TotalBytes    int64
+	HandshakeCount int64
+	ConnectCount  int64
+	ConnectErrors int64
+	DeniedRequests int64
 }
 
-var metrics = &Metrics{}
+var metrics = &ServerMetrics{}
 
-func (m *Metrics) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (m *ServerMetrics) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	fmt.Fprintf(w, "# Server Metrics\n")
 	fmt.Fprintf(w, "active_streams %d\n", atomic.LoadInt64(&m.ActiveStreams))
@@ -96,10 +99,9 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // ============================================================================
 
 type Server struct {
-	session      *yamux.Session
-	config       *ServerConfig
-	activeCount  int64
-	streamLimit  chan struct{}
+	session     *yamux.Session
+	config      *ServerConfig
+	streamLimit chan struct{}
 }
 
 func NewServer(session *yamux.Session, config *ServerConfig) *Server {
@@ -164,6 +166,17 @@ func main() {
 	}
 
 	server := NewServer(session, cfg)
+
+	// Fix #9: Graceful shutdown with signal handling
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+
+	go func() {
+		<-ctx.Done()
+		log.Printf("Received shutdown signal, closing session...")
+		session.Close()
+	}()
+
 	server.Serve()
 }
 
@@ -208,12 +221,10 @@ func (s *Server) Serve() {
 		// Rate limit: try to acquire stream slot
 		select {
 		case s.streamLimit <- struct{}{}:
-			// Got slot, proceed
 			atomic.AddInt64(&metrics.ActiveStreams, 1)
 			atomic.AddInt64(&metrics.TotalStreams, 1)
 			go s.handleStream(stream)
 		default:
-			// At limit, reject
 			log.Printf("Stream limit reached (%d), rejecting", s.config.MaxStreams)
 			atomic.AddInt64(&metrics.DeniedRequests, 1)
 			stream.Close()
@@ -233,7 +244,7 @@ func (s *Server) handleStream(stream net.Conn) {
 	// Set idle timeout
 	stream.SetDeadline(time.Now().Add(s.config.IdleTimeout))
 
-	// Read Message (JSON)
+	// Read Message (JSON) — Fix #5: Payload is now json.RawMessage
 	decoder := json.NewDecoder(stream)
 	var msg protocol.Message
 	if err := decoder.Decode(&msg); err != nil {
@@ -250,9 +261,9 @@ func (s *Server) handleStream(stream net.Conn) {
 		s.handleHandshake(stream)
 	case protocol.MsgTypeConnect:
 		atomic.AddInt64(&metrics.ConnectCount, 1)
-		payloadBytes, _ := json.Marshal(msg.Payload)
+		// Fix #5: Direct unmarshal from RawMessage (no double serialization)
 		var freq protocol.ConnectRequest
-		if err := json.Unmarshal(payloadBytes, &freq); err != nil {
+		if err := json.Unmarshal(msg.Payload, &freq); err != nil {
 			log.Printf("Invalid connect payload: %v", err)
 			return
 		}
@@ -312,7 +323,7 @@ func (s *Server) handleConnect(stream net.Conn, req protocol.ConnectRequest) {
 
 	defer targetConn.Close()
 
-	// Proxy with buffer pool for zero-copy
+	// Proxy with buffer pool
 	done := make(chan struct{}, 2)
 
 	go func() {
@@ -349,7 +360,13 @@ type stdioConn struct {
 	io.Writer
 }
 
-func (c *stdioConn) Close() error                       { return nil }
+// Fix #8: Properly close stdin/stdout so the server can exit cleanly
+func (c *stdioConn) Close() error {
+	os.Stdin.Close()
+	os.Stdout.Close()
+	return nil
+}
+
 func (c *stdioConn) LocalAddr() net.Addr                { return &net.UnixAddr{Name: "stdio", Net: "stdio"} }
 func (c *stdioConn) RemoteAddr() net.Addr               { return &net.UnixAddr{Name: "stdio", Net: "stdio"} }
 func (c *stdioConn) SetDeadline(t time.Time) error      { return nil }

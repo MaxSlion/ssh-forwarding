@@ -86,7 +86,7 @@ export namespace main {
 
 		constructor(source: any = {}) {
 			if ('string' === typeof source) source = JSON.parse(source);
-			this.agentPath = source["agentPath"] || "./server-agent";
+			this.agentPath = source["agentPath"] || "/server-agent";
 			this.connectionTimeout = source["connectionTimeout"] || 10;
 			this.localBindAddress = source["localBindAddress"] || "127.0.0.1";
 			this.autoReconnect = source["autoReconnect"] ?? true;

@@ -1,13 +1,15 @@
 package protocol
 
+import "encoding/json"
+
 const (
 	MsgTypeHandshake = "handshake"
 	MsgTypeConnect   = "connect"
 )
 
 type Message struct {
-	Type    string `json:"type"`
-	Payload any    `json:"payload"`
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload"`
 }
 
 type HandshakeRequest struct {
@@ -33,6 +35,6 @@ type ConnectRequest struct {
 }
 
 type ConnectResponse struct {
-    Success bool   `json:"success"`
-    Error   string `json:"error,omitempty"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
 }

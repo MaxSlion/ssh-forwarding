@@ -22,7 +22,7 @@ type AppSettings struct {
 
 func defaultSettings() AppSettings {
 	return AppSettings{
-		AgentPath:        "./server-agent",
+		AgentPath:        "/server-agent",
 		ConnectionTimeout: 10,
 		LocalBindAddress: "127.0.0.1",
 		AutoReconnect:    true,

@@ -2,7 +2,7 @@ import { Settings, Terminal, ChevronDown, Loader2, Network, Check, Play, Square,
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { Textarea } from "./ui/textarea";
+
 import { useState, useEffect, useRef } from "react";
 import { connectV2, testConnection } from "../api";
 import { WindowMinimise, WindowMaximise, WindowUnmaximise, WindowIsMaximised, Quit } from "../../../wailsjs/runtime/runtime";
@@ -51,7 +51,7 @@ export function SSHLogin() {
   const [port, setPort] = useState("22");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [sshConfig, setSshConfig] = useState("");
+
   const [saveConnection, setSaveConnection] = useState(false);
   const [connectionName, setConnectionName] = useState("");
 
@@ -514,9 +514,7 @@ export function SSHLogin() {
                 </div>
 
                 <div className="p-6">
-                  <div className="grid grid-cols-2 gap-6">
-                    {/* 左列 */}
-                    <div className="space-y-4">
+                  <div className="space-y-4">
                       <div className="space-y-2">
                         <Label htmlFor="host" className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-slate-700'}`}>
                           {t.hostAddress}
@@ -579,25 +577,6 @@ export function SSHLogin() {
                           <ChevronDown className={`h-4 w-4 ${isDark ? 'text-gray-400' : 'text-slate-500'}`} />
                         </Button>
                       </div>
-                    </div>
-
-                    {/* 右列 */}
-                    <div className="space-y-2">
-                      <Label htmlFor="sshConfig" className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-slate-700'}`}>
-                        {t.sshConfigOptional}
-                      </Label>
-                      <Textarea
-                        id="sshConfig"
-                        placeholder={"Host example\n  HostName example.com\n  Port 22\n  User root"}
-                        value={sshConfig}
-                        onChange={(e) => setSshConfig(e.target.value)}
-                        className={`min-h-[180px] font-mono text-xs resize-none leading-relaxed ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-500' : 'border-slate-300'
-                          }`}
-                      />
-                      <p className={`text-xs ${isDark ? 'text-gray-500' : 'text-slate-500'}`}>
-                        {t.sshConfigHint}
-                      </p>
-                    </div>
                   </div>
 
                   {/* 底部操作栏 */}
@@ -650,7 +629,7 @@ export function SSHLogin() {
               {/* 底部提示 */}
               <div className={`mt-3 flex items-center justify-between text-xs ${isDark ? 'text-gray-500' : 'text-slate-500'}`}>
                 <span>{t.sshProtocol}</span>
-                <span>v1.0.0</span>
+                <span>v1.2.0</span>
               </div>
             </div>
           )}
