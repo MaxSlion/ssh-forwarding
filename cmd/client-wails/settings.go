@@ -46,8 +46,18 @@ func (a *App) LoadSettings() AppSettings {
 	path := settingsFilePath()
 	data, err := os.ReadFile(path)
 	if err != nil {
-		log.Printf("No settings file, using defaults: %v", err)
-		return defaultSettings()
+		defaults := defaultSettings()
+		if os.IsNotExist(err) {
+			if saveErr := a.writeSettings(path, defaults); saveErr != nil {
+				log.Printf("Settings file not found; using defaults (failed to create %s): %v", path, saveErr)
+			} else {
+				log.Printf("Settings file not found; created defaults at %s", path)
+			}
+			return defaults
+		}
+
+		log.Printf("Failed to read settings file, using defaults: %v", err)
+		return defaults
 	}
 
 	settings := defaultSettings()
@@ -61,17 +71,21 @@ func (a *App) LoadSettings() AppSettings {
 // SaveSettings persists settings to disk
 func (a *App) SaveSettings(settings AppSettings) bool {
 	path := settingsFilePath()
-	data, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		log.Printf("Failed to marshal settings: %v", err)
-		return false
-	}
-	if err := os.WriteFile(path, data, 0644); err != nil {
-		log.Printf("Failed to write settings: %v", err)
+	if err := a.writeSettings(path, settings); err != nil {
+		log.Printf("Failed to save settings: %v", err)
 		return false
 	}
 	log.Printf("Settings saved to %s", path)
 	return true
+}
+
+func (a *App) writeSettings(path string, settings AppSettings) error {
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, data, 0644)
 }
 
 // GetSettingsPath returns the path to the settings file (for debug)

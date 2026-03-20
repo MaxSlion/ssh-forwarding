@@ -3,8 +3,8 @@
 # build-macos.sh - Build client for macOS (must run on macOS)
 # ============================================================================
 # Usage:
-#   ./build-macos.sh              # Build client for macOS
-#   ./build-macos.sh --universal  # Build universal binary (amd64 + arm64)
+#   ./build-macos.sh              # Build client-wails.app for current macOS arch
+#   ./build-macos.sh --universal  # Build universal client-wails.app (amd64 + arm64)
 # ============================================================================
 
 set -euo pipefail
@@ -15,6 +15,15 @@ mkdir -p "$BIN_DIR"
 
 FRONTEND_DIR="$ROOT/cmd/client-wails/frontend"
 CLIENT_DIR="$ROOT/cmd/client-wails"
+
+if command -v wails >/dev/null 2>&1; then
+    WAILS_BIN="wails"
+elif [[ -x "$HOME/go/bin/wails" ]]; then
+    WAILS_BIN="$HOME/go/bin/wails"
+else
+    echo "ERROR: wails CLI not found. Install it with: go install github.com/wailsapp/wails/v2/cmd/wails@latest"
+    exit 1
+fi
 
 UNIVERSAL=false
 if [[ "${1:-}" == "--universal" ]]; then
@@ -32,55 +41,34 @@ cd "$FRONTEND_DIR"
 npm run build
 echo "  -> frontend/dist ready"
 
-# ── Build Client (macOS) ────────────────────────────────────────────────────
+# ── Build Client App (macOS release) ───────────────────────────────────────
 cd "$CLIENT_DIR"
 
+BUILD_PLATFORM="darwin/$(go env GOARCH)"
 if $UNIVERSAL; then
-    echo ""
-    echo ">>> Building universal macOS binary (amd64 + arm64)..."
-
-    # Build amd64
-    echo "  -> Building amd64..."
-    GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 \
-        go build -trimpath -tags "desktop,production" \
-        -ldflags="-s -w" \
-        -o "$BIN_DIR/ssh-forwarder-darwin-amd64" .
-
-    # Build arm64
-    echo "  -> Building arm64..."
-    GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 \
-        go build -trimpath -tags "desktop,production" \
-        -ldflags="-s -w" \
-        -o "$BIN_DIR/ssh-forwarder-darwin-arm64" .
-
-    # Create universal binary
-    echo "  -> Creating universal binary..."
-    lipo -create -output "$BIN_DIR/ssh-forwarder-darwin-universal" \
-        "$BIN_DIR/ssh-forwarder-darwin-amd64" \
-        "$BIN_DIR/ssh-forwarder-darwin-arm64"
-
-    echo "  -> $BIN_DIR/ssh-forwarder-darwin-universal"
-else
-    # Detect current arch
-    ARCH=$(uname -m)
-    if [[ "$ARCH" == "x86_64" ]]; then
-        GOARCH="amd64"
-    else
-        GOARCH="arm64"
-    fi
-
-    echo ""
-    echo ">>> Building client for darwin/$GOARCH..."
-    GOOS=darwin GOARCH=$GOARCH CGO_ENABLED=1 \
-        go build -trimpath -tags "desktop,production" \
-        -ldflags="-s -w" \
-        -o "$BIN_DIR/ssh-forwarder-darwin-$GOARCH" .
-
-    echo "  -> $BIN_DIR/ssh-forwarder-darwin-$GOARCH"
+    BUILD_PLATFORM="darwin/universal"
 fi
 
 echo ""
+echo ">>> Building release app bundle ($BUILD_PLATFORM)..."
+CGO_LDFLAGS="${CGO_LDFLAGS:-} -framework UniformTypeIdentifiers" \
+    "$WAILS_BIN" build -clean -tags "desktop,production" -platform "$BUILD_PLATFORM"
+
+APP_SRC="$CLIENT_DIR/build/bin/client-wails.app"
+APP_DST="$BIN_DIR/client-wails.app"
+
+if [[ ! -d "$APP_SRC" ]]; then
+    echo "ERROR: Expected app bundle not found at $APP_SRC"
+    exit 1
+fi
+
+rm -rf "$APP_DST"
+cp -R "$APP_SRC" "$APP_DST"
+
+echo "  -> $APP_DST"
+
+echo ""
 echo "========================================"
-echo " macOS build complete! Output in: dist/"
+echo " macOS release app build complete!"
 echo "========================================"
-ls -lh "$BIN_DIR"/ssh-forwarder-darwin-*
+ls -la "$BIN_DIR"/client-wails.app
