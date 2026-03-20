@@ -5,6 +5,8 @@ import "encoding/json"
 const (
 	MsgTypeHandshake = "handshake"
 	MsgTypeConnect   = "connect"
+	MsgTypePing      = "ping"
+	MsgTypePong      = "pong"
 )
 
 type Message struct {
@@ -37,4 +39,14 @@ type ConnectRequest struct {
 type ConnectResponse struct {
 	Success bool   `json:"success"`
 	Error   string `json:"error,omitempty"`
+}
+
+// Ping/Pong for application-level heartbeat
+type PingRequest struct {
+	Timestamp int64 `json:"ts"`
+}
+
+type PongResponse struct {
+	Timestamp int64 `json:"ts"`
+	ServerTS  int64 `json:"server_ts"`
 }

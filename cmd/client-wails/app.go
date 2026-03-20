@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"strings"
@@ -13,20 +14,29 @@ import (
 	"time"
 
 	"github.com/hashicorp/yamux"
+	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/crypto/ssh"
 	"ssh-forwarder/pkg/protocol"
 )
 
-// App struct holds all connection state (Fix #1: no more global mutable state)
+// ============================================================================
+// App — all connection state lives here (no globals)
+// ============================================================================
+
 type App struct {
-	ctx          context.Context
-	mu           sync.Mutex // single lock for all state
-	sshClient    *ssh.Client
-	yamuxSession *yamux.Session
-	listeners    map[string]net.Listener
+	ctx context.Context
+
+	mu             sync.Mutex
+	sshClient      *ssh.Client
+	yamuxSession   *yamux.Session
+	listeners      map[string]net.Listener
+	lastConnectReq *ConnectRequest              // saved for auto-reconnect
+	activeForwards map[string]string             // boundAddr -> target (for reconnect)
+	heartbeatStop  chan struct{}                  // signal to stop heartbeat goroutine
 }
 
-// ConnectRequest holds SSH connection details
+// ── Request / Response types ────────────────────────────────────────────────
+
 type ConnectRequest struct {
 	Host      string `json:"host"`
 	User      string `json:"username"`
@@ -41,26 +51,46 @@ type ConnectResponse struct {
 	Config  *protocol.HandshakeResponse `json:"config,omitempty"`
 }
 
-// NewApp creates a new App application struct
+type TestConnectionResult struct {
+	Success   bool   `json:"success"`
+	Error     string `json:"error,omitempty"`
+	Latency   string `json:"latency,omitempty"`
+	SSHBanner string `json:"sshBanner,omitempty"`
+}
+
+// ── Lifecycle ───────────────────────────────────────────────────────────────
+
 func NewApp() *App {
 	return &App{
-		listeners: make(map[string]net.Listener),
+		listeners:      make(map[string]net.Listener),
+		activeForwards: make(map[string]string),
 	}
 }
 
-// startup is called when the app starts
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
-// getSession safely returns the current yamux session (Fix #6)
+// ── Session helpers ─────────────────────────────────────────────────────────
+
+// getSession safely returns current yamux session (may be nil)
 func (a *App) getSession() *yamux.Session {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.yamuxSession
 }
 
-// ConnectSSH establishes the SSH connection and handshake
+// emitEvent sends an event to the frontend
+func (a *App) emitEvent(name string, data interface{}) {
+	if a.ctx != nil {
+		wailsRuntime.EventsEmit(a.ctx, name, data)
+	}
+}
+
+// ============================================================================
+// ConnectSSH — main connection entry point
+// ============================================================================
+
 func (a *App) ConnectSSH(req ConnectRequest) ConnectResponse {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -72,7 +102,6 @@ func (a *App) ConnectSSH(req ConnectRequest) ConnectResponse {
 	atomic.StoreUint64(&globalMetrics.BytesSent, 0)
 	atomic.StoreUint64(&globalMetrics.BytesReceived, 0)
 
-	// Fix #3: Load settings for timeout
 	settings := a.loadSettingsUnlocked()
 
 	err := a.connectSSH(req, settings)
@@ -86,18 +115,36 @@ func (a *App) ConnectSSH(req ConnectRequest) ConnectResponse {
 		return ConnectResponse{Success: false, Error: err.Error()}
 	}
 
+	// Save for auto-reconnect
+	reqCopy := req
+	a.lastConnectReq = &reqCopy
+
+	// Start heartbeat
+	a.heartbeatStop = make(chan struct{})
+	go a.heartbeatLoop(a.heartbeatStop)
+
 	return ConnectResponse{Success: true, Config: resp}
 }
 
-// Disconnect closes the SSH session and all listeners
+// ============================================================================
+// Disconnect
+// ============================================================================
+
 func (a *App) Disconnect() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.lastConnectReq = nil // clear to prevent auto-reconnect
 	a.disconnectLocked()
 	return true
 }
 
 func (a *App) disconnectLocked() {
+	// Stop heartbeat
+	if a.heartbeatStop != nil {
+		close(a.heartbeatStop)
+		a.heartbeatStop = nil
+	}
+
 	// Stop all listeners
 	for addr, ln := range a.listeners {
 		ln.Close()
@@ -114,21 +161,21 @@ func (a *App) disconnectLocked() {
 	}
 }
 
-// StartForward starts a local listener that forwards traffic to the remote target
+// ============================================================================
+// Port Forwarding
+// ============================================================================
+
 func (a *App) StartForward(localPort, target string) (string, error) {
-	// Fix #4: Use localBindAddress from settings
 	settings := a.LoadSettings()
 	bindAddr := localPort
 	if localPort == ":0" || localPort == "0" {
 		bindAddr = settings.LocalBindAddress + ":0"
 	} else {
-		// localPort is like ":2222", prepend bind address
 		port := strings.TrimPrefix(localPort, ":")
 		bindAddr = net.JoinHostPort(settings.LocalBindAddress, port)
 	}
 
 	a.mu.Lock()
-	// Check if port already tracked
 	if localPort != ":0" && localPort != "0" {
 		for _, ln := range a.listeners {
 			if ln.Addr().String() == bindAddr {
@@ -148,6 +195,7 @@ func (a *App) StartForward(localPort, target string) (string, error) {
 
 	a.mu.Lock()
 	a.listeners[boundAddr] = ln
+	a.activeForwards[boundAddr] = target // track for reconnect
 	a.mu.Unlock()
 
 	go func() {
@@ -156,14 +204,22 @@ func (a *App) StartForward(localPort, target string) (string, error) {
 			if err != nil {
 				return // Listener closed
 			}
+
+			// TCP tuning on accepted connection
+			if tc, ok := conn.(*net.TCPConn); ok {
+				tc.SetKeepAlive(true)
+				tc.SetKeepAlivePeriod(30 * time.Second)
+				tc.SetNoDelay(true)
+			}
+
 			go a.handleForwarding(conn, target)
 		}
 	}()
 
+	log.Printf("[forward] listening on %s -> %s", boundAddr, target)
 	return boundAddr, nil
 }
 
-// StopForward stops the listener on the given local port
 func (a *App) StopForward(localPort string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -175,66 +231,234 @@ func (a *App) StopForward(localPort string) bool {
 
 	ln.Close()
 	delete(a.listeners, localPort)
+	delete(a.activeForwards, localPort)
+	log.Printf("[forward] stopped %s", localPort)
 	return true
 }
 
-// handleForwarding proxies data between the local connection and remote target
+// handleForwarding proxies data with proper half-close (P0) and error logging
 func (a *App) handleForwarding(localConn net.Conn, target string) {
 	defer localConn.Close()
 
-	// Fix #6: safely get session reference
 	session := a.getSession()
 	if session == nil {
+		log.Printf("[forward] no active session for %s", target)
 		return
 	}
 
 	// Open Yamux stream
 	stream, err := session.Open()
 	if err != nil {
+		log.Printf("[forward] failed to open stream for %s: %v", target, err)
+		a.emitEvent("forward-error", map[string]string{
+			"target": target, "error": fmt.Sprintf("stream open: %v", err),
+		})
 		return
 	}
 	defer stream.Close()
 
-	// Send Connect Request (Fix #5: use json.RawMessage)
+	// Send Connect Request
 	payload, _ := json.Marshal(protocol.ConnectRequest{Target: target})
 	msg := protocol.Message{Type: protocol.MsgTypeConnect, Payload: payload}
 	if err := json.NewEncoder(stream).Encode(msg); err != nil {
+		log.Printf("[forward] connect encode error for %s: %v", target, err)
 		return
 	}
 
 	// Wait for Connect Response
 	var resp protocol.ConnectResponse
 	if err := json.NewDecoder(stream).Decode(&resp); err != nil {
+		log.Printf("[forward] connect decode error for %s: %v", target, err)
 		return
 	}
-
 	if !resp.Success {
+		log.Printf("[forward] remote denied %s: %s", target, resp.Error)
+		a.emitEvent("forward-error", map[string]string{
+			"target": target, "error": resp.Error,
+		})
 		return
 	}
 
-	// Fix #2: Pipe data and wait for BOTH directions to complete
+	// ── Bidirectional copy with proper half-close ────────────────────
 	done := make(chan struct{}, 2)
+
+	// local → remote
 	go func() {
-		io.Copy(stream, localConn) // Upload
+		io.Copy(stream, localConn)
+		// Signal remote: local finished sending
+		stream.Close() // yamux stream Close acts as half-close
 		done <- struct{}{}
 	}()
+
+	// remote → local
 	go func() {
-		io.Copy(localConn, stream) // Download
+		io.Copy(localConn, stream)
+		// Signal local app: remote finished sending
+		if tc, ok := localConn.(*net.TCPConn); ok {
+			tc.CloseWrite()
+		}
 		done <- struct{}{}
 	}()
+
 	<-done
-	<-done // ← Fix: wait for both directions
+	<-done
 }
 
-// TestConnectionResult holds the result of a connection test
-type TestConnectionResult struct {
-	Success   bool   `json:"success"`
-	Error     string `json:"error,omitempty"`
-	Latency   string `json:"latency,omitempty"`
-	SSHBanner string `json:"sshBanner,omitempty"`
+// ============================================================================
+// Heartbeat — detect dead connections early
+// ============================================================================
+
+func (a *App) heartbeatLoop(stop chan struct{}) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	failCount := 0
+
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			session := a.getSession()
+			if session == nil || session.IsClosed() {
+				log.Printf("[heartbeat] session gone, triggering reconnect")
+				a.emitEvent("connection-lost", nil)
+				go a.tryReconnect()
+				return
+			}
+
+			// Ping via a short-lived stream
+			if err := a.sendPing(session); err != nil {
+				failCount++
+				log.Printf("[heartbeat] ping failed (%d/3): %v", failCount, err)
+				if failCount >= 3 {
+					log.Printf("[heartbeat] 3 consecutive failures, triggering reconnect")
+					a.emitEvent("connection-lost", nil)
+					go a.tryReconnect()
+					return
+				}
+			} else {
+				failCount = 0
+			}
+		}
+	}
 }
 
-// TestConnection attempts SSH dial+auth, reports result, then disconnects.
+func (a *App) sendPing(session *yamux.Session) error {
+	stream, err := session.Open()
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+
+	stream.SetDeadline(time.Now().Add(5 * time.Second))
+
+	payload, _ := json.Marshal(protocol.PingRequest{Timestamp: time.Now().UnixMilli()})
+	msg := protocol.Message{Type: protocol.MsgTypePing, Payload: payload}
+	if err := json.NewEncoder(stream).Encode(msg); err != nil {
+		return err
+	}
+
+	var pong protocol.PongResponse
+	if err := json.NewDecoder(stream).Decode(&pong); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ============================================================================
+// Auto-reconnect with exponential backoff
+// ============================================================================
+
+func (a *App) tryReconnect() {
+	a.mu.Lock()
+	req := a.lastConnectReq
+	if req == nil {
+		a.mu.Unlock()
+		return // user explicitly disconnected, don't reconnect
+	}
+	reqCopy := *req
+
+	// Snapshot active forwards before disconnecting
+	forwards := make(map[string]string)
+	for addr, target := range a.activeForwards {
+		forwards[addr] = target
+	}
+
+	a.disconnectLocked()
+	a.mu.Unlock()
+
+	settings := a.LoadSettings()
+	if !settings.AutoReconnect {
+		log.Printf("[reconnect] auto-reconnect disabled in settings")
+		a.emitEvent("connection-status", map[string]string{"status": "disconnected"})
+		return
+	}
+
+	maxAttempts := 5
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		delay := time.Duration(attempt*attempt) * time.Second // 1s, 4s, 9s, 16s, 25s
+		log.Printf("[reconnect] attempt %d/%d in %v...", attempt, maxAttempts, delay)
+		a.emitEvent("reconnecting", map[string]interface{}{
+			"attempt": attempt, "maxAttempts": maxAttempts, "delay": delay.String(),
+		})
+		time.Sleep(delay)
+
+		a.mu.Lock()
+		if a.lastConnectReq == nil {
+			// User manually disconnected during backoff
+			a.mu.Unlock()
+			return
+		}
+
+		err := a.connectSSH(reqCopy, settings)
+		if err != nil {
+			a.mu.Unlock()
+			log.Printf("[reconnect] attempt %d failed: %v", attempt, err)
+			continue
+		}
+
+		_, err = a.performHandshake()
+		if err != nil {
+			a.disconnectLocked()
+			a.mu.Unlock()
+			log.Printf("[reconnect] handshake failed: %v", err)
+			continue
+		}
+
+		// Restart heartbeat
+		a.heartbeatStop = make(chan struct{})
+		go a.heartbeatLoop(a.heartbeatStop)
+
+		a.mu.Unlock()
+
+		// Restore port forwards
+		restoredCount := 0
+		for _, target := range forwards {
+			if _, err := a.StartForward(":0", target); err == nil {
+				restoredCount++
+			} else {
+				log.Printf("[reconnect] failed to restore forward to %s: %v", target, err)
+			}
+		}
+
+		log.Printf("[reconnect] success! Restored %d/%d forwards", restoredCount, len(forwards))
+		a.emitEvent("reconnected", map[string]interface{}{
+			"restored": restoredCount, "total": len(forwards),
+		})
+		return
+	}
+
+	log.Printf("[reconnect] all %d attempts failed", maxAttempts)
+	a.emitEvent("connection-status", map[string]string{
+		"status": "failed", "error": "auto-reconnect failed after max attempts",
+	})
+}
+
+// ============================================================================
+// TestConnection
+// ============================================================================
+
 func (a *App) TestConnection(req ConnectRequest) TestConnectionResult {
 	start := time.Now()
 
@@ -252,11 +476,9 @@ func (a *App) TestConnection(req ConnectRequest) TestConnectionResult {
 	config := &ssh.ClientConfig{
 		User:            req.User,
 		Auth:            auths,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: implement known_hosts
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         timeout,
-		BannerCallback: func(message string) error {
-			return nil
-		},
+		BannerCallback:  func(message string) error { return nil },
 	}
 
 	client, err := ssh.Dial("tcp", req.Host, config)
@@ -264,39 +486,14 @@ func (a *App) TestConnection(req ConnectRequest) TestConnectionResult {
 
 	if err != nil {
 		return TestConnectionResult{
-			Success: false,
-			Error:   classifySSHError(err),
-			Latency: latency,
+			Success: false, Error: classifySSHError(err), Latency: latency,
 		}
 	}
 
 	banner := string(client.ServerVersion())
 	client.Close()
 
-	return TestConnectionResult{
-		Success:   true,
-		Latency:   latency,
-		SSHBanner: banner,
-	}
-}
-
-// classifySSHError returns a user-friendly error message
-func classifySSHError(err error) string {
-	msg := err.Error()
-	switch {
-	case strings.Contains(msg, "connection refused"):
-		return "连接被拒绝: 目标主机未开放 SSH 服务"
-	case strings.Contains(msg, "i/o timeout") || strings.Contains(msg, "deadline exceeded"):
-		return "连接超时: 无法到达目标主机"
-	case strings.Contains(msg, "no route to host"):
-		return "网络不可达: 无法路由到目标主机"
-	case strings.Contains(msg, "unable to authenticate") || strings.Contains(msg, "handshake failed"):
-		return "认证失败: 用户名或密码错误"
-	case strings.Contains(msg, "no supported methods remain"):
-		return "认证失败: 服务器不支持密码认证"
-	default:
-		return fmt.Sprintf("连接失败: %s", msg)
-	}
+	return TestConnectionResult{Success: true, Latency: latency, SSHBanner: banner}
 }
 
 // GetStatus returns the current connection status
@@ -305,6 +502,10 @@ func (a *App) GetStatus() bool {
 	defer a.mu.Unlock()
 	return a.sshClient != nil && a.yamuxSession != nil && !a.yamuxSession.IsClosed()
 }
+
+// ============================================================================
+// SSH/Yamux internals
+// ============================================================================
 
 // CountedConn wraps net.Conn to track bytes
 type CountedConn struct {
@@ -323,7 +524,6 @@ func (c *CountedConn) Write(b []byte) (n int, err error) {
 	return
 }
 
-// connectSSH establishes the SSH connection (Fix #3: uses settings for timeout)
 func (a *App) connectSSH(req ConnectRequest, settings AppSettings) error {
 	auths := []ssh.AuthMethod{}
 	if req.Pass != "" {
@@ -338,13 +538,20 @@ func (a *App) connectSSH(req ConnectRequest, settings AppSettings) error {
 	config := &ssh.ClientConfig{
 		User:            req.User,
 		Auth:            auths,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: implement known_hosts
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         timeout,
 	}
 
 	conn, err := net.DialTimeout("tcp", req.Host, config.Timeout)
 	if err != nil {
 		return err
+	}
+
+	// TCP tuning on SSH connection
+	if tc, ok := conn.(*net.TCPConn); ok {
+		tc.SetKeepAlive(true)
+		tc.SetKeepAlivePeriod(30 * time.Second)
+		tc.SetNoDelay(true)
 	}
 
 	countedConn := &CountedConn{Conn: conn}
@@ -355,7 +562,6 @@ func (a *App) connectSSH(req ConnectRequest, settings AppSettings) error {
 		return err
 	}
 	client := ssh.NewClient(c, chans, reqs)
-
 	a.sshClient = client
 
 	session, err := client.NewSession()
@@ -381,8 +587,13 @@ func (a *App) connectSSH(req ConnectRequest, settings AppSettings) error {
 	}
 
 	rwConn := &stdioRWC{Reader: stdout, WriteCloser: stdin}
+
+	// Yamux config aligned with server (1MB window)
 	cfg := yamux.DefaultConfig()
 	cfg.EnableKeepAlive = true
+	cfg.KeepAliveInterval = 15 * time.Second
+	cfg.MaxStreamWindowSize = 1024 * 1024 // 1MB — match server
+
 	ysess, err := yamux.Client(rwConn, cfg)
 	if err != nil {
 		return err
@@ -391,7 +602,6 @@ func (a *App) connectSSH(req ConnectRequest, settings AppSettings) error {
 	return nil
 }
 
-// performHandshake sends handshake request and receives port config (Fix #5: json.RawMessage)
 func (a *App) performHandshake() (*protocol.HandshakeResponse, error) {
 	stream, err := a.yamuxSession.Open()
 	if err != nil {
@@ -416,7 +626,28 @@ func (a *App) performHandshake() (*protocol.HandshakeResponse, error) {
 	return &resp, nil
 }
 
-// loadSettingsUnlocked reads settings without acquiring a.mu (caller must hold lock)
+// ============================================================================
+// Helpers
+// ============================================================================
+
+func classifySSHError(err error) string {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "connection refused"):
+		return "连接被拒绝: 目标主机未开放 SSH 服务"
+	case strings.Contains(msg, "i/o timeout") || strings.Contains(msg, "deadline exceeded"):
+		return "连接超时: 无法到达目标主机"
+	case strings.Contains(msg, "no route to host"):
+		return "网络不可达: 无法路由到目标主机"
+	case strings.Contains(msg, "unable to authenticate") || strings.Contains(msg, "handshake failed"):
+		return "认证失败: 用户名或密码错误"
+	case strings.Contains(msg, "no supported methods remain"):
+		return "认证失败: 服务器不支持密码认证"
+	default:
+		return fmt.Sprintf("连接失败: %s", msg)
+	}
+}
+
 func (a *App) loadSettingsUnlocked() AppSettings {
 	path := settingsFilePath()
 	data, err := os.ReadFile(path)

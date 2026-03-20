@@ -67,7 +67,7 @@ func putBuffer(buf *[]byte) {
 }
 
 // ============================================================================
-// Metrics (renamed to ServerMetrics for clarity — Fix #15)
+// Metrics (renamed to ServerMetrics for clarity)
 // ============================================================================
 
 type ServerMetrics struct {
@@ -167,7 +167,7 @@ func main() {
 
 	server := NewServer(session, cfg)
 
-	// Fix #9: Graceful shutdown with signal handling
+	// Graceful shutdown with signal handling
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
@@ -244,7 +244,7 @@ func (s *Server) handleStream(stream net.Conn) {
 	// Set idle timeout
 	stream.SetDeadline(time.Now().Add(s.config.IdleTimeout))
 
-	// Read Message (JSON) — Fix #5: Payload is now json.RawMessage
+	// Read Message (JSON) Payload is now json.RawMessage
 	decoder := json.NewDecoder(stream)
 	var msg protocol.Message
 	if err := decoder.Decode(&msg); err != nil {
@@ -261,13 +261,18 @@ func (s *Server) handleStream(stream net.Conn) {
 		s.handleHandshake(stream)
 	case protocol.MsgTypeConnect:
 		atomic.AddInt64(&metrics.ConnectCount, 1)
-		// Fix #5: Direct unmarshal from RawMessage (no double serialization)
 		var freq protocol.ConnectRequest
 		if err := json.Unmarshal(msg.Payload, &freq); err != nil {
 			log.Printf("Invalid connect payload: %v", err)
 			return
 		}
 		s.handleConnect(stream, freq)
+	case protocol.MsgTypePing:
+		// Heartbeat — respond with pong immediately
+		var ping protocol.PingRequest
+		json.Unmarshal(msg.Payload, &ping)
+		pong := protocol.PongResponse{Timestamp: ping.Timestamp, ServerTS: time.Now().UnixMilli()}
+		json.NewEncoder(stream).Encode(pong)
 	default:
 		log.Printf("Unknown message type: %s", msg.Type)
 	}
@@ -360,7 +365,7 @@ type stdioConn struct {
 	io.Writer
 }
 
-// Fix #8: Properly close stdin/stdout so the server can exit cleanly
+// Properly close stdin/stdout so the server can exit cleanly
 func (c *stdioConn) Close() error {
 	os.Stdin.Close()
 	os.Stdout.Close()

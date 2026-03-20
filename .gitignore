@@ -18,9 +18,12 @@
 go.work
 
 # Wails
+bin/
 cmd/client-wails/build/
 cmd/client-wails/frontend/dist/
 cmd/client-wails/frontend/node_modules/
+docs/
+release/
 
 # Node
 node_modules/

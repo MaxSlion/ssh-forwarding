@@ -515,68 +515,68 @@ export function SSHLogin() {
 
                 <div className="p-6">
                   <div className="space-y-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="host" className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-slate-700'}`}>
-                          {t.hostAddress}
-                        </Label>
-                        <div className="flex gap-2">
-                          <Input
-                            id="host"
-                            type="text"
-                            placeholder="example.com"
-                            value={host}
-                            onChange={(e) => setHost(e.target.value)}
-                            className={`flex-1 h-9 ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-500' : 'border-slate-300'}`}
-                          />
-                          <Input
-                            id="port"
-                            type="text"
-                            placeholder="22"
-                            value={port}
-                            onChange={(e) => setPort(e.target.value)}
-                            className={`w-20 h-9 text-center ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-500' : 'border-slate-300'}`}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="username" className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-slate-700'}`}>
-                          {t.username}
-                        </Label>
+                    <div className="space-y-2">
+                      <Label htmlFor="host" className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-slate-700'}`}>
+                        {t.hostAddress}
+                      </Label>
+                      <div className="flex gap-2">
                         <Input
-                          id="username"
+                          id="host"
                           type="text"
-                          placeholder="root"
-                          value={username}
-                          onChange={(e) => setUsername(e.target.value)}
-                          className={`h-9 ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-500' : 'border-slate-300'}`}
+                          placeholder="example.com"
+                          value={host}
+                          onChange={(e) => setHost(e.target.value)}
+                          className={`flex-1 h-9 ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-500' : 'border-slate-300'}`}
                         />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="password" className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-slate-700'}`}>
-                          {t.password}
-                        </Label>
                         <Input
-                          id="password"
-                          type="password"
-                          placeholder="••••••••"
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          className={`h-9 ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-500' : 'border-slate-300'}`}
+                          id="port"
+                          type="text"
+                          placeholder="22"
+                          value={port}
+                          onChange={(e) => setPort(e.target.value)}
+                          className={`w-20 h-9 text-center ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-500' : 'border-slate-300'}`}
                         />
                       </div>
+                    </div>
 
-                      <div className="space-y-2">
-                        <Label className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-slate-700'}`}>
-                          {t.authMethod}
-                        </Label>
-                        <Button variant="outline" className={`w-full justify-between h-9 ${isDark ? 'bg-gray-700 border-gray-600 text-gray-200' : ''
-                          }`}>
-                          {t.passwordAuth}
-                          <ChevronDown className={`h-4 w-4 ${isDark ? 'text-gray-400' : 'text-slate-500'}`} />
-                        </Button>
-                      </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="username" className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-slate-700'}`}>
+                        {t.username}
+                      </Label>
+                      <Input
+                        id="username"
+                        type="text"
+                        placeholder="root"
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        className={`h-9 ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-500' : 'border-slate-300'}`}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="password" className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-slate-700'}`}>
+                        {t.password}
+                      </Label>
+                      <Input
+                        id="password"
+                        type="password"
+                        placeholder="••••••••"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className={`h-9 ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100 placeholder:text-gray-500' : 'border-slate-300'}`}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-slate-700'}`}>
+                        {t.authMethod}
+                      </Label>
+                      <Button variant="outline" className={`w-full justify-between h-9 ${isDark ? 'bg-gray-700 border-gray-600 text-gray-200' : ''
+                        }`}>
+                        {t.passwordAuth}
+                        <ChevronDown className={`h-4 w-4 ${isDark ? 'text-gray-400' : 'text-slate-500'}`} />
+                      </Button>
+                    </div>
                   </div>
 
                   {/* 底部操作栏 */}
@@ -629,7 +629,7 @@ export function SSHLogin() {
               {/* 底部提示 */}
               <div className={`mt-3 flex items-center justify-between text-xs ${isDark ? 'text-gray-500' : 'text-slate-500'}`}>
                 <span>{t.sshProtocol}</span>
-                <span>v1.2.0</span>
+                <span>v1.3.0</span>
               </div>
             </div>
           )}
